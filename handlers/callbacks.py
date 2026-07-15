@@ -1,14 +1,45 @@
 import math
 import aiosqlite
 from datetime import datetime, timedelta
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
 
 import database as db
 import keyboards as kb
-from utils import get_user_tag, notify_admin, ADMIN_ID
+from utils import get_user_tag, notify_admin, ADMIN_ID, format_num
 
+# ==========================================
+# دالة مساعدة لبناء قائمة الدرجات (للتعديل والعرض)
+# ==========================================
+async def build_grades_response(user_id):
+    grades = await db.get_grades_from_db(user_id)
+    if not grades:
+        return None, None
+
+    response = "📊 <b>سجل الدرجات</b>\n\n"
+    inline_keys = []
+    current_subject = ""
+
+    for g in grades:
+        if g['subject'] != current_subject:
+            current_subject = g['subject']
+            response += f"📘 <b>{current_subject}:</b>\n"
+        
+        score_txt = format_num(g['score']) if g['score'] == g['total'] else f"{format_num(g['score'])}/{format_num(g['total'])}"
+        title = g['title'] if g['title'] else "بدون عنوان"
+        response += f"  • {title}: <code>{score_txt}</code>\n"
+        
+        # زر التعديل لكل درجة
+        inline_keys.append([InlineKeyboardButton(f"✏️ تعديل: {title[:20]} ({score_txt})", callback_data=f"grade_edit_{g['id']}")])
+
+    inline_keys.append([InlineKeyboardButton("◀️ رجوع للدرجات", callback_data="menu_grade")])
+    return response, InlineKeyboardMarkup(inline_keys)
+
+
+# ==========================================
+# دالة مساعدة لحفظ المهمة
+# ==========================================
 async def save_task_and_finish(query, context, user, attachment=None, link=None):
     task_type = context.user_data.get('task_type')
     title = context.user_data.get('task_title')
@@ -38,6 +69,9 @@ async def save_task_and_finish(query, context, user, attachment=None, link=None)
         reply_markup=kb.get_main_menu()
     )
 
+# ==========================================
+# معالج الأزرار الرئيسي
+# ==========================================
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -45,6 +79,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_tag = get_user_tag(user)
     data = query.data
 
+    # ===== رد الأدمن =====
     if data.startswith("admin_reply_"):
         if user.id != ADMIN_ID:
             return await query.answer("❌ هذا الزر للمطور فقط!", show_alert=True)
@@ -60,12 +95,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not data.startswith(("tfilter_", "tpage_", "menu_main", "grade_back", "menu_settings", "noop")):
         await notify_admin(context.bot, f"🔘 ضغط <b>{user_tag}</b> على:\n<code>{data}</code>")
 
+    # ===== القائمة الرئيسية =====
     if data == "menu_main":
         is_auth = context.user_data.get('auth')
         context.user_data.clear()
         context.user_data['auth'] = is_auth
         await query.edit_message_text("⚙️ <b>القائمة الرئيسية</b>", parse_mode=ParseMode.HTML, reply_markup=kb.get_main_menu())
 
+    # ===== الإعدادات =====
     elif data == "menu_settings":
         await query.edit_message_text("⚙️ <b>إعدادات الحساب</b>", parse_mode=ParseMode.HTML, reply_markup=kb.get_settings_menu())
 
@@ -82,6 +119,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['action'] = 'AWAITING_DEFAULT_REMIND'
         await query.edit_message_text("⏰ أرسل عدد الساعات الافتراضية للتنبيه (مثال: 24):", parse_mode=ParseMode.HTML, reply_markup=kb.get_back_button())
 
+    elif data == "set_change_pwd":
+        context.user_data['action'] = 'AWAITING_OLD_PWD'
+        await query.edit_message_text("🔑 أرسل كلمة السر الحالية:", parse_mode=ParseMode.HTML, reply_markup=kb.get_back_button())
+
+    elif data == "set_msg_admin":
+        context.user_data['action'] = 'AWAITING_MSG_ADMIN'
+        await query.edit_message_text("✉️ اكتب رسالتك للمطور الآن:", parse_mode=ParseMode.HTML, reply_markup=kb.get_back_button())
+
+    # ===== إضافة مهمة جديدة =====
     elif data == "menu_add":
         await query.edit_message_text("📝 <b>إضافة مهمة جديدة</b>\n\nاختر نوع المهمة:", parse_mode=ParseMode.HTML, reply_markup=kb.get_task_types_menu())
 
@@ -114,6 +160,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "attach_no":
         await save_task_and_finish(query, context, user)
 
+    # ===== التقويم =====
     elif data == "menu_calendar":
         now = datetime.now()
         year, month = now.year, now.month
@@ -165,8 +212,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 except: pass
         await query.edit_message_text(f"📅 <b>{month}/{year}</b>", parse_mode=ParseMode.HTML, reply_markup=kb.generate_calendar(year, month, tasks_by_day))
 
+    # ===== عرض المهام =====
     elif data.startswith("tfilter_") or data.startswith("tpage_"):
-        # (نفس كود عرض المهام الخاص بك بدون تعديل، فقط استبدل دوال الكيبورد بـ kb.)
         parts = data.split("_")
         action, current_filter = parts[0], parts[1]
         current_page = int(parts[2]) if action == "tpage" else 1
@@ -201,6 +248,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             buttons.append([InlineKeyboardButton("◀️ رجوع", callback_data="menu_main")])
             await query.edit_message_text(response, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(buttons))
 
+    # ===== إجراءات المهمة =====
     elif data.startswith("action_"):
         task_id = int(data.split("_")[1])
         context.user_data['current_task_id'] = task_id
@@ -239,6 +287,54 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer("📌 تم تثبيت المهمة!", show_alert=True)
         await query.edit_message_text("✅ تم التثبيت.", reply_markup=kb.get_main_menu())
 
+    elif data.startswith("del_task_"):
+        task_id = int(data.split("_")[2])
+        async with aiosqlite.connect("student_dashboard.db") as db_conn:
+            await db_conn.execute('DELETE FROM tasks WHERE id = ?', (task_id,))
+            await db_conn.commit()
+        await query.answer("🗑 تم حذف المهمة!", show_alert=True)
+        await query.edit_message_text("✅ تم الحذف.", reply_markup=kb.get_main_menu())
+
+    # ===== نظام الدرجات المتطور =====
+    elif data == "menu_grade":
+        await query.edit_message_text("📊 <b>إدارة الدرجات</b>\n\nاختر عملية:", parse_mode=ParseMode.HTML, reply_markup=kb.get_grades_menu())
+
+    elif data == "grade_add":
+        context.user_data['action'] = 'waiting_new_subject'
+        await query.edit_message_text("📝 أرسل <b>اسم المادة</b> (مثال: الرياضيات):\n(للإلغاء أرسل /cancel)", parse_mode=ParseMode.HTML, reply_markup=kb.get_back_button())
+
+    elif data == "grade_view_all":
+        response, markup = await build_grades_response(user.id)
+        if not response:
+            await query.answer("📭 لا توجد درجات مسجلة بعد!", show_alert=True)
+            return
+        await query.edit_message_text(response, parse_mode=ParseMode.HTML, reply_markup=markup)
+
+    elif data == "grade_add_another":
+        # هذا الزر يسمح بإضافة درجات بلا نهاية لنفس المادة
+        subject = context.user_data.get('current_subject')
+        if subject:
+            context.user_data['action'] = 'waiting_grade_input'
+            await query.edit_message_text(
+                f"📚 مادة: <b>{subject}</b>\n\nأرسل الدرجة التالية (مثال: الشهر الثاني 85):\n(للإنهاء اضغط رجوع للقائمة)", 
+                parse_mode=ParseMode.HTML, 
+                reply_markup=kb.get_back_button()
+            )
+        else:
+            context.user_data['action'] = 'waiting_new_subject'
+            await query.edit_message_text("📝 أرسل اسم المادة:", parse_mode=ParseMode.HTML, reply_markup=kb.get_back_button())
+
+    elif data.startswith("grade_edit_"):
+        grade_id = int(data.split("_")[-1])
+        context.user_data['action'] = 'waiting_edit_grade_score'
+        context.user_data['edit_grade_id'] = grade_id
+        await query.edit_message_text(
+            "✏️ أرسل الدرجة الجديدة (مثال: 95 أو 85/100):\n(للإلغاء أرسل /cancel)", 
+            parse_mode=ParseMode.HTML, 
+            reply_markup=kb.get_back_button()
+        )
+
+    # ===== الإنجازات =====
     elif data == "menu_achievements":
         badges = await db.get_badges(user.id)
         xp, level = await db.get_user_xp(user.id)
