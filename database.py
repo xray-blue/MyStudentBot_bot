@@ -192,3 +192,9 @@ async def add_badge(user_id, badge_name):
     async with aiosqlite.connect(DB_NAME) as db:
         await db.execute('INSERT INTO badges (user_id, badge_name) VALUES (?, ?)', (user_id, badge_name))
         await db.commit()
+
+async def get_user_subjects(user_id):
+    async with aiosqlite.connect(DB_NAME) as db:
+        cursor = await db.execute('SELECT DISTINCT subject FROM grades WHERE user_id = ?', (user_id,))
+        rows = await cursor.fetchall()
+        return [row[0] for row in rows]
