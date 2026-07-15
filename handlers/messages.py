@@ -1,8 +1,9 @@
 import re
 import logging
 import aiosqlite
+import hashlib
 from datetime import datetime, timedelta
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
 
@@ -48,6 +49,10 @@ async def save_task_and_finish_from_message(update, context, user):
         reply_markup=kb.get_main_menu()
     )
 
+def clean_rtl(text):
+    """دالة لإزالة رموز اتجاه الكتابة المخفية من تليجرام"""
+    return text.replace('\u200f', '').replace('\u200e', '').replace('\u202a', '').replace('\u202c', '').strip()
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     user_tag = get_user_tag(user)
@@ -79,7 +84,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if state == 'AWAITING_LOGIN':
         real_hash = await db.get_user_hash(user.id)
-        import hashlib
         if hashlib.sha256(text.encode()).hexdigest() == real_hash:
             context.user_data.clear(); context.user_data['auth'] = True
             return await update.message.reply_text("✅ تم تسجيل الدخول!", reply_markup=kb.get_main_menu())
@@ -91,7 +95,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await update.message.reply_text("🔐 يرجى إرسال كلمة المرور للبدء:")
 
     if action == 'AWAITING_OLD_PWD':
-        import hashlib
         if hashlib.sha256(text.encode()).hexdigest() == await db.get_user_hash(user.id):
             context.user_data['action'] = 'AWAITING_NEW_PWD'
             return await update.message.reply_text("✅ أرسل كلمة السر الجديدة:", reply_markup=kb.get_back_button())
@@ -113,7 +116,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if action == 'AWAITING_MSG_ADMIN':
         context.user_data.pop('action', None)
-        # يمكنك إضافة دالة إرسال رسالة للأدمن في قاعدة البيانات هنا
         return await update.message.reply_text("✅ تم إرسال رسالتك للمطور!", reply_markup=kb.get_main_menu())
 
     if action == 'awaiting_task_title':
@@ -165,15 +167,29 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return await update.message.reply_text(f"✅ تم التأجيل إلى {new_date}.", reply_markup=kb.get_main_menu())
         except: return await update.message.reply_text("❌ أرسل رقماً صحيحاً.", reply_markup=kb.get_back_button())
 
+    # ===== إضافة مادة جديدة =====
     if action == 'waiting_new_subject':
-        context.user_data['current_subject'] = text.strip()
+        subject = text.strip()
+        context.user_data['current_subject'] = subject
         context.user_data['action'] = 'waiting_grade_input'
-        return await update.message.reply_text(f"✅ تم إنشاء المادة. أضف أول درجة:", reply_markup=kb.get_back_button())
+        await update.message.reply_text(f"✅ تم إنشاء مادة <b>{subject}</b>.\n\nأرسل أول درجة بهذه الصيغة:\n<code>الشهر الأول 90</code>\nأو: <code>نصفي 15/20</code>", parse_mode=ParseMode.HTML, reply_markup=kb.get_back_button())
+        return
 
+    # ===== إضافة درجة (محدث ليعالج الرموز المخفية) =====
     if action == 'waiting_grade_input':
         subject = context.user_data.get('current_subject')
-        match = re.match(r"^(.*?)\s+(\d+(?:\.\d+)?)(?:\s*[/من]\s*(\d+(?:\.\d+)?))?$", text)
-        if not match: return await update.message.reply_text("❌ مثال: الشهر الأول 90", parse_mode=ParseMode.HTML, reply_markup=kb.get_back_button())
+        # تنظيف النص من الرموز المخفية
+        clean_text = clean_rtl(text)
+        
+        match = re.match(r"^(.+?)\s+(\d+(?:\.\d+)?)(?:\s*[/من]\s*(\d+(?:\.\d+)?))?", clean_text)
+        
+        if not match: 
+            return await update.message.reply_text(
+                "❌ صيغة خاطئة! تأكد من كتابة (العنوان) ثم مسافة ثم (الرقم).\nمثال: <code>الشهر الأول 90</code>", 
+                parse_mode=ParseMode.HTML, 
+                reply_markup=kb.get_back_button()
+            )
+            
         title = match.group(1).strip()
         score = float(match.group(2))
         total = float(match.group(3)) if match.group(3) else score
@@ -182,10 +198,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await db.add_xp(user.id, 5)
         score_txt = format_num(score) if total == score else f"{format_num(score)}/{format_num(total)}"
         
-        # لا نزيل الـ action لنسمح بإضافة درجة أخرى
         await notify_admin(context.bot, f"📊 أضاف <b>{user_tag}</b> درجة [{subject}]: {title} {score_txt}")
         
-        # أزرار إضافة درجة أخرى أو العودة للقائمة
         cont_kb = InlineKeyboardMarkup([
             [InlineKeyboardButton("➕ إضافة درجة أخرى لنفس المادة", callback_data="grade_add_another")],
             [InlineKeyboardButton("◀️ رجوع للقائمة", callback_data="menu_main")]
@@ -197,11 +211,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # ===== معالجة تعديل الدرجة =====
+    # ===== تعديل درجة =====
     if action == 'waiting_edit_grade_score':
         grade_id = context.user_data.get('edit_grade_id')
-        match = re.match(r"^(\d+(?:\.\d+)?)(?:\s*[/من]\s*(\d+(?:\.\d+)?))?$", text)
-        if not match: return await update.message.reply_text("❌ صيغة خاطئة! أرسل الرقم فقط أو (رقم/من رقم)", parse_mode=ParseMode.HTML, reply_markup=kb.get_back_button())
+        clean_text = clean_rtl(text)
+        
+        match = re.match(r"^(\d+(?:\.\d+)?)(?:\s*[/من]\s*(\d+(?:\.\d+)?))?", clean_text)
+        if not match: 
+            return await update.message.reply_text(
+                "❌ صيغة خاطئة! أرسل الرقم فقط أو (رقم/من رقم)\nمثال: <code>95</code> أو <code>85/100</code>", 
+                parse_mode=ParseMode.HTML, 
+                reply_markup=kb.get_back_button()
+            )
         
         score = float(match.group(1))
         total = float(match.group(2)) if match.group(2) else score
@@ -232,7 +253,6 @@ async def media_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await save_task_and_finish_from_message(update, context, user)
             return
 
-    # إرسال الوسائط للأدمن
     caption = f"🚨 أرسل <b>{get_user_tag(user)}</b> ميديا:"
     if update.message.caption: caption += f"\n{update.message.caption}"
     try:
