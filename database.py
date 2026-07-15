@@ -62,13 +62,25 @@ async def init_db():
             FOREIGN KEY(user_id) REFERENCES users(user_id) ON DELETE CASCADE
         )''')
 
-        # التوافق مع الإصدار السابق
-        for col, dtype in [("completed BOOLEAN DEFAULT 0"), ("priority INTEGER DEFAULT 0"), ("attachment TEXT"), ("link TEXT")]:
-            try: await db.execute(f"ALTER TABLE tasks ADD COLUMN {col}")
-            except: pass
-        for col, dtype in [("xp INTEGER DEFAULT 0"), ("level INTEGER DEFAULT 1"), ("language TEXT DEFAULT 'ar'"), ("default_remind_hours INTEGER DEFAULT 24")]:
-            try: await db.execute(f"ALTER TABLE users ADD COLUMN {col}")
-            except: pass
+        # التوافق مع الإصدار السابق - إضافة أعمدة للمهام
+        try: await db.execute("ALTER TABLE tasks ADD COLUMN completed BOOLEAN DEFAULT 0")
+        except: pass
+        try: await db.execute("ALTER TABLE tasks ADD COLUMN priority INTEGER DEFAULT 0")
+        except: pass
+        try: await db.execute("ALTER TABLE tasks ADD COLUMN attachment TEXT")
+        except: pass
+        try: await db.execute("ALTER TABLE tasks ADD COLUMN link TEXT")
+        except: pass
+
+        # إضافة أعمدة للمستخدمين
+        try: await db.execute("ALTER TABLE users ADD COLUMN xp INTEGER DEFAULT 0")
+        except: pass
+        try: await db.execute("ALTER TABLE users ADD COLUMN level INTEGER DEFAULT 1")
+        except: pass
+        try: await db.execute("ALTER TABLE users ADD COLUMN language TEXT DEFAULT 'ar'")
+        except: pass
+        try: await db.execute("ALTER TABLE users ADD COLUMN default_remind_hours INTEGER DEFAULT 24")
+        except: pass
 
         await db.commit()
 
