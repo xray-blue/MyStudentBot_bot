@@ -177,11 +177,45 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         title = match.group(1).strip()
         score = float(match.group(2))
         total = float(match.group(3)) if match.group(3) else score
+        
         await db.add_grade_to_db(user.id, subject, title, score, total)
-        context.user_data.pop('action', None)
         await db.add_xp(user.id, 5)
         score_txt = format_num(score) if total == score else f"{format_num(score)}/{format_num(total)}"
-        return await update.message.reply_text(f"✅ تم تسجيل <code>{title}: {score_txt}</code>", parse_mode=ParseMode.HTML, reply_markup=kb.get_main_menu())
+        
+        # لا نزيل الـ action لنسمح بإضافة درجة أخرى
+        await notify_admin(context.bot, f"📊 أضاف <b>{user_tag}</b> درجة [{subject}]: {title} {score_txt}")
+        
+        # أزرار إضافة درجة أخرى أو العودة للقائمة
+        cont_kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("➕ إضافة درجة أخرى لنفس المادة", callback_data="grade_add_another")],
+            [InlineKeyboardButton("◀️ رجوع للقائمة", callback_data="menu_main")]
+        ])
+        await update.message.reply_text(
+            f"✅ تم تسجيل <code>{title}: {score_txt}</code> في <b>{subject}</b>", 
+            parse_mode=ParseMode.HTML, 
+            reply_markup=cont_kb
+        )
+        return
+
+    # ===== معالجة تعديل الدرجة =====
+    if action == 'waiting_edit_grade_score':
+        grade_id = context.user_data.get('edit_grade_id')
+        match = re.match(r"^(\d+(?:\.\d+)?)(?:\s*[/من]\s*(\d+(?:\.\d+)?))?$", text)
+        if not match: return await update.message.reply_text("❌ صيغة خاطئة! أرسل الرقم فقط أو (رقم/من رقم)", parse_mode=ParseMode.HTML, reply_markup=kb.get_back_button())
+        
+        score = float(match.group(1))
+        total = float(match.group(2)) if match.group(2) else score
+        
+        async with aiosqlite.connect("student_dashboard.db") as db_conn:
+            await db_conn.execute('UPDATE grades SET score = ?, total = ? WHERE id = ?', (score, total, grade_id))
+            await db_conn.commit()
+            
+        context.user_data.pop('action', None)
+        context.user_data.pop('edit_grade_id', None)
+        
+        score_txt = format_num(score) if total == score else f"{format_num(score)}/{format_num(total)}"
+        await update.message.reply_text(f"✅ تم تعديل الدرجة بنجاح إلى: <code>{score_txt}</code>", parse_mode=ParseMode.HTML, reply_markup=kb.get_main_menu())
+        return
 
     await update.message.reply_text("📌 استخدم الأزرار للتنقل:", reply_markup=kb.get_main_menu())
 
