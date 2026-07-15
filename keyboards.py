@@ -74,6 +74,13 @@ def get_task_action_menu(task_id):
         [InlineKeyboardButton("◀️ رجوع", callback_data="menu_main")]
     ])
 
+def get_grades_menu():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("➕ إضافة درجة لمادة", callback_data="grade_add")],
+        [InlineKeyboardButton("📊 عرض جميع الدرجات", callback_data="grade_view_all")],
+        [InlineKeyboardButton("◀️ رجوع", callback_data="menu_main")]
+    ])
+
 def generate_calendar(year, month, tasks_by_day):
     keyboard = []
     keyboard.append([InlineKeyboardButton(f"{month}/{year}", callback_data="noop")])
