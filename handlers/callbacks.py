@@ -10,34 +10,6 @@ import keyboards as kb
 from utils import get_user_tag, notify_admin, ADMIN_ID, format_num
 
 # ==========================================
-# دالة مساعدة لبناء قائمة الدرجات (للتعديل والعرض)
-# ==========================================
-async def build_grades_response(user_id):
-    grades = await db.get_grades_from_db(user_id)
-    if not grades:
-        return None, None
-
-    response = "📊 <b>سجل الدرجات</b>\n\n"
-    inline_keys = []
-    current_subject = ""
-
-    for g in grades:
-        if g['subject'] != current_subject:
-            current_subject = g['subject']
-            response += f"📘 <b>{current_subject}:</b>\n"
-        
-        score_txt = format_num(g['score']) if g['score'] == g['total'] else f"{format_num(g['score'])}/{format_num(g['total'])}"
-        title = g['title'] if g['title'] else "بدون عنوان"
-        response += f"  • {title}: <code>{score_txt}</code>\n"
-        
-        # زر التعديل لكل درجة
-        inline_keys.append([InlineKeyboardButton(f"✏️ تعديل: {title[:20]} ({score_txt})", callback_data=f"grade_edit_{g['id']}")])
-
-    inline_keys.append([InlineKeyboardButton("◀️ رجوع للدرجات", callback_data="menu_grade")])
-    return response, InlineKeyboardMarkup(inline_keys)
-
-
-# ==========================================
 # دالة مساعدة لحفظ المهمة
 # ==========================================
 async def save_task_and_finish(query, context, user, attachment=None, link=None):
@@ -288,43 +260,102 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("✅ تم التثبيت.", reply_markup=kb.get_main_menu())
 
     elif data.startswith("del_task_"):
-        task_id = int(data.split("_")[2])
+        task_id = int(data.split("_")[-1])
         async with aiosqlite.connect("student_dashboard.db") as db_conn:
             await db_conn.execute('DELETE FROM tasks WHERE id = ?', (task_id,))
             await db_conn.commit()
         await query.answer("🗑 تم حذف المهمة!", show_alert=True)
         await query.edit_message_text("✅ تم الحذف.", reply_markup=kb.get_main_menu())
 
-    # ===== نظام الدرجات المتطور =====
+    # =====================================================================
+    # ===== نظام الدرجات المتطور (القائمة الفرعية والمواد) =====
+    # =====================================================================
     elif data == "menu_grade":
         await query.edit_message_text("📊 <b>إدارة الدرجات</b>\n\nاختر عملية:", parse_mode=ParseMode.HTML, reply_markup=kb.get_grades_menu())
 
     elif data == "grade_add":
         context.user_data['action'] = 'waiting_new_subject'
-        await query.edit_message_text("📝 أرسل <b>اسم المادة</b> (مثال: الرياضيات):\n(للإلغاء أرسل /cancel)", parse_mode=ParseMode.HTML, reply_markup=kb.get_back_button())
+        await query.edit_message_text("📝 أرسل <b>اسم المادة</b> الجديدة (مثال: الرياضيات):\n(للإلغاء أرسل /cancel)", parse_mode=ParseMode.HTML, reply_markup=kb.get_back_button())
 
     elif data == "grade_view_all":
-        response, markup = await build_grades_response(user.id)
-        if not response:
-            await query.answer("📭 لا توجد درجات مسجلة بعد!", show_alert=True)
+        # جلب أسماء المواد فقط
+        subjects = await db.get_user_subjects(user.id)
+        if not subjects:
+            await query.answer("📭 لا توجد مواد مسجلة بعد! أضف مادة جديدة.", show_alert=True)
             return
-        await query.edit_message_text(response, parse_mode=ParseMode.HTML, reply_markup=markup)
+        
+        # حفظ أسماء المواد مؤقتاً لمعرفة أي مادة تم اختيارها
+        context.user_data['subjects_list'] = subjects
+        
+        buttons = []
+        for idx, subj in enumerate(subjects):
+            buttons.append([InlineKeyboardButton(f"📘 {subj}", callback_data=f"subj_view_{idx}")])
+        
+        buttons.append([InlineKeyboardButton("◀️ رجوع للقائمة الرئيسية", callback_data="menu_main")])
+        await query.edit_message_text("📚 <b>موادي المسجلة:</b>\n\nاختر مادة لعرض تفاصيلها وإضافة درجات:", parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(buttons))
+
+    elif data.startswith("subj_view_"):
+        # عند الضغط على اسم مادة معينة
+        idx = int(data.split("_")[-1])
+        subjects = context.user_data.get('subjects_list', [])
+        
+        if idx >= len(subjects):
+            return await query.answer("❌ حدث خطأ في تحميل المادة!", show_alert=True)
+            
+        subject = subjects[idx]
+        grades = await db.get_grades_from_db(user.id, subject=subject)
+        
+        response = f"📘 <b>مادة: {subject}</b>\n\n"
+        buttons = []
+        
+        if not grades:
+            response += "لا توجد درجات مسجلة في هذه المادة بعد."
+        else:
+            for g in grades:
+                score_txt = format_num(g['score']) if g['score'] == g['total'] else f"{format_num(g['score'])}/{format_num(g['total'])}"
+                title = g['title'] if g['title'] else "بدون عنوان"
+                response += f"• {title}: <code>{score_txt}</code>\n"
+                # زر التعديل بجانب كل درجة
+                buttons.append([InlineKeyboardButton(f"✏️ تعديل: {title[:20]} ({score_txt})", callback_data=f"grade_edit_{g['id']}")])
+        
+        # أزرار إضافة درجة جديدة لهذه المادة أو الرجوع
+        buttons.append([InlineKeyboardButton(f"➕ إضافة درجة جديدة لمادة ({subject})", callback_data=f"grade_add_to_subj_{idx}")])
+        buttons.append([InlineKeyboardButton("◀️ رجوع لقائمة المواد", callback_data="grade_view_all")])
+        
+        await query.edit_message_text(response, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(buttons))
+
+    elif data.startswith("grade_add_to_subj_"):
+        # عند اختيار إضافة درجة لمادة موجودة مسبقاً
+        idx = int(data.split("_")[-1])
+        subjects = context.user_data.get('subjects_list', [])
+        
+        if idx < len(subjects):
+            subject = subjects[idx]
+            context.user_data['current_subject'] = subject
+            context.user_data['action'] = 'waiting_grade_input'
+            
+            # نستخدم reply_text بدل edit_message_text لكي يبقى قائمة المادة ظاهرة فوقها
+            await query.message.reply_text(
+                f"📚 مادة: <b>{subject}</b>\n\nأرسل الدرجة الجديدة (مثال: الشهر الثاني 85):\n(للإنهاء أرسل /cancel)", 
+                parse_mode=ParseMode.HTML
+            )
+            await query.answer("✅ تم تحديد المادة، اكتب الدرجة الآن", show_alert=False)
 
     elif data == "grade_add_another":
-        # هذا الزر يسمح بإضافة درجات بلا نهاية لنفس المادة
+        # إضافة درجة أخرى لنفس المادة (بعد إضافة درجة سابقة)
         subject = context.user_data.get('current_subject')
         if subject:
             context.user_data['action'] = 'waiting_grade_input'
-            await query.edit_message_text(
-                f"📚 مادة: <b>{subject}</b>\n\nأرسل الدرجة التالية (مثال: الشهر الثاني 85):\n(للإنهاء اضغط رجوع للقائمة)", 
-                parse_mode=ParseMode.HTML, 
-                reply_markup=kb.get_back_button()
+            await query.message.reply_text(
+                f"📚 مادة: <b>{subject}</b>\n\nأرسل الدرجة التالية:", 
+                parse_mode=ParseMode.HTML
             )
         else:
             context.user_data['action'] = 'waiting_new_subject'
             await query.edit_message_text("📝 أرسل اسم المادة:", parse_mode=ParseMode.HTML, reply_markup=kb.get_back_button())
 
     elif data.startswith("grade_edit_"):
+        # تعديل درجة
         grade_id = int(data.split("_")[-1])
         context.user_data['action'] = 'waiting_edit_grade_score'
         context.user_data['edit_grade_id'] = grade_id
