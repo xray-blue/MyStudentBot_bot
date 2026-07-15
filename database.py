@@ -1,12 +1,10 @@
 import aiosqlite
 import hashlib
-from utils import ADMIN_ID
 
 DB_NAME = "student_dashboard.db"
 
 async def init_db():
     async with aiosqlite.connect(DB_NAME) as db:
-        # (نفس كود إنشاء الجداول الذي عندك، لن أختصره لحفظ حقوقك)
         await db.execute('''CREATE TABLE IF NOT EXISTS tasks (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
@@ -62,7 +60,7 @@ async def init_db():
             FOREIGN KEY(user_id) REFERENCES users(user_id) ON DELETE CASCADE
         )''')
 
-        # التوافق مع الإصدار السابق - إضافة أعمدة للمهام
+        # التوافق مع الإصدار السابق
         try: await db.execute("ALTER TABLE tasks ADD COLUMN completed BOOLEAN DEFAULT 0")
         except: pass
         try: await db.execute("ALTER TABLE tasks ADD COLUMN priority INTEGER DEFAULT 0")
@@ -71,8 +69,6 @@ async def init_db():
         except: pass
         try: await db.execute("ALTER TABLE tasks ADD COLUMN link TEXT")
         except: pass
-
-        # إضافة أعمدة للمستخدمين
         try: await db.execute("ALTER TABLE users ADD COLUMN xp INTEGER DEFAULT 0")
         except: pass
         try: await db.execute("ALTER TABLE users ADD COLUMN level INTEGER DEFAULT 1")
@@ -93,7 +89,7 @@ async def add_task_to_db(user_id, task_type, title, due_date, remind_before, pri
             (user_id, task_type, title, due_date, remind_before, priority, attachment, link)
         )
         await db.commit()
-        return cursor.lastrowid # مهم جداً: إرجاع id المهمة
+        return cursor.lastrowid
 
 async def get_tasks_from_db(user_id, task_filter=None, include_completed=False):
     async with aiosqlite.connect(DB_NAME) as db:
@@ -113,6 +109,24 @@ async def update_task_completion(task_id, completed):
     async with aiosqlite.connect(DB_NAME) as db:
         await db.execute('UPDATE tasks SET completed = ? WHERE id = ?', (completed, task_id))
         await db.commit()
+
+# ===== دوال الدرجات =====
+async def add_grade_to_db(user_id, subject, title, score, total):
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute(
+            '''INSERT INTO grades (user_id, subject, score, total, title) VALUES (?, ?, ?, ?, ?)''',
+            (user_id, subject, score, total, title)
+        )
+        await db.commit()
+
+async def get_grades_from_db(user_id, subject=None):
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        if subject:
+            cursor = await db.execute('SELECT * FROM grades WHERE user_id = ? AND subject = ? ORDER BY id DESC', (user_id, subject))
+        else:
+            cursor = await db.execute('SELECT * FROM grades WHERE user_id = ? ORDER BY subject, id DESC', (user_id,))
+        return await cursor.fetchall()
 
 # ===== دوال المستخدمين والإعدادات =====
 async def get_user_hash(user_id):
@@ -177,12 +191,4 @@ async def get_badges(user_id):
 async def add_badge(user_id, badge_name):
     async with aiosqlite.connect(DB_NAME) as db:
         await db.execute('INSERT INTO badges (user_id, badge_name) VALUES (?, ?)', (user_id, badge_name))
-        await db.commit()
-
-async def add_grade_to_db(user_id, subject, title, score, total):
-    async with aiosqlite.connect(DB_NAME) as db:
-        await db.execute(
-            '''INSERT INTO grades (user_id, subject, score, total, title) VALUES (?, ?, ?, ?, ?)''',
-            (user_id, subject, score, total, title)
-        )
         await db.commit()
