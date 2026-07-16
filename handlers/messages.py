@@ -13,12 +13,29 @@ from utils import get_user_tag, notify_admin, ADMIN_ID, format_num
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    if not await db.get_user_hash(user.id):
-        context.user_data['state'] = 'AWAITING_SET_PWD'
-        await update.message.reply_text("🔐 يرجى اختيار كلمة مرور للحساب (4 أحرف على الأقل):")
-    else:
-        context.user_data['state'] = 'AWAITING_LOGIN'
-        await update.message.reply_text("🔐 يرجى إرسال كلمة المرور:")
+    # التأكد من استدعاء أزرار التليجرام
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    
+    welcome_text = f"""
+👋 أهلاً بك يا <b>{user.first_name}</b> في **بوت الطالب الذكي!**
+
+🛠️ <b>شرح الأدوات المتاحة:</b>
+
+📝 <b>إدارة المهام:</b> أضف امتحانات، واجبات، وتحضيرات مع تحديد الأولوية والتاريخ وتلقي التنبيهات.
+📊 <b>سجل الدرجات:</b> سجل درجاتك لكل مادة بشكل منفصل، وعرف متوسطك، وعدّل أي درجة بسهولة.
+📅 <b>التقويم:</b> شاهد مهامك مرتبة بشكل يومي على التقويم.
+🏆 <b>الإنجازات:</b> أكمل مهامك واحصل على نقاط الخبرة (XP) وارفع مستواك!
+💬 <b>التواصل المباشر:</b> اكتب أي شيء وسأرد عليك فوراً (المطور).
+
+اضغط على الزر أدناه للبدء 👇
+"""
+    
+    # زر البدء
+    start_kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🚀 ابدأ الآن (تسجيل / دخول)", callback_data="auth_start")]
+    ])
+    
+    await update.message.reply_text(welcome_text, parse_mode=ParseMode.HTML, reply_markup=start_kb)
 
 async def save_task_and_finish_from_message(update, context, user):
     task_type = context.user_data.get('task_type')
