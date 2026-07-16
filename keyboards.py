@@ -80,6 +80,13 @@ def get_grades_menu():
         [InlineKeyboardButton("◀️ رجوع", callback_data="menu_main")]
     ])
 
+def get_notes_menu():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("➕ كتابة ملاحظة جديدة", callback_data="note_add_prompt")],
+        [InlineKeyboardButton("📅 عرض الملاحظات بالتقويم", callback_data="menu_calendar")],
+        [InlineKeyboardButton("◀️ رجوع", callback_data="menu_main")]
+    ])
+
 def generate_calendar(year, month, tasks_by_day):
     # tasks_by_day الآن بهيكل: { day: {'tasks': int, 'notes': int} }
     keyboard = []
