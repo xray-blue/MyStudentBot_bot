@@ -69,10 +69,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user.id == ADMIN_ID and action == 'ADMIN_TYPING_REPLY':
         target_id = context.user_data.get('reply_to_id')
         try:
-            await context.bot.send_message(chat_id=target_id, text=f"📬 <b>رد من المطور:</b>\n\n{text}", parse_mode=ParseMode.HTML)
-            await update.message.reply_text("✅ تم إرسال الرد!")
-        except: await update.message.reply_text("❌ فشل الإرسال.")
-        context.user_data.clear(); context.user_data['auth'] = True
+            # إرسال الرد للمستخدم باسم "المطور" فقط كما طلبت
+            await context.bot.send_message(chat_id=target_id, text=f"📬 <b>المطور:</b>\n\n{text}", parse_mode=ParseMode.HTML)
+            await update.message.reply_text("✅ تم إرسال الرد للمستخدم بنجاح!")
+        except: 
+            await update.message.reply_text("❌ فشل الإرسال. تأكد أن المستخدم لم يحظر البوت.")
+        # تنظيف حالة الأدمن
+        is_auth = context.user_data.get('auth')
+        context.user_data.clear()
+        if is_auth: context.user_data['auth'] = True
         return
 
     if state == 'AWAITING_SET_PWD':
@@ -116,7 +121,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if action == 'AWAITING_MSG_ADMIN':
         context.user_data.pop('action', None)
-        return await update.message.reply_text("✅ تم إرسال رسالتك للمطور!", reply_markup=kb.get_main_menu())
+        # تصميم رسالة الأدمن مع زر الرد السريع
+        admin_msg = f"✉️ <b>رسالة جديدة من المستخدم:</b>\nالاسم: {user_tag}\nالآيدي: <code>{user.id}</code>\n\nالرسالة:\n{text}"
+        admin_kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("💬 رد على هذه الرسالة", callback_data=f"admin_reply_{user.id}")]
+        ])
+        try:
+            # إرسال الرسالة لك أنت (للأدمن)
+            await context.bot.send_message(chat_id=ADMIN_ID, text=admin_msg, parse_mode=ParseMode.HTML, reply_markup=admin_kb)
+            await update.message.reply_text("✅ تم إرسال رسالتك للمطور بنجاح!", reply_markup=kb.get_main_menu())
+        except Exception as e:
+            await update.message.reply_text("❌ حدث خطأ في إرسال الرسالة.", reply_markup=kb.get_main_menu())
+        return
 
     if action == 'awaiting_task_title':
         context.user_data['task_title'] = text
