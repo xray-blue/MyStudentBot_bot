@@ -18,7 +18,7 @@ def get_main_menu():
 def get_task_types_menu():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📝 امتحان", callback_data="type_exam"), InlineKeyboardButton("📚 واجب", callback_data="type_homework")],
-        [InlineKeyboardButton("📖 تحضير", callback_data="type_prep"), InlineKeyboardButton("📄 ملاحظة سريعة", callback_data="type_note")],
+        [InlineKeyboardButton("📖 تحضير", callback_data="type_prep"),
         [InlineKeyboardButton("◀️ رجوع", callback_data="menu_main")]
     ])
 
