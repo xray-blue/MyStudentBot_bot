@@ -261,3 +261,19 @@ async def media_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif update.message.video: await context.bot.send_video(chat_id=ADMIN_ID, video=update.message.video.file_id, caption=caption, parse_mode=ParseMode.HTML)
     except Exception as e:
         logging.error(f"فشل إرسال الميديا للأدمن: {e}")
+
+# ===== أوامر الاختصارات =====
+async def cmd_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.user_data.get('auth'):
+        return await update.message.reply_text("🔐 يرجى تسجيل الدخول أولاً عبر /start")
+    await update.message.reply_text("📝 <b>إضافة مهمة جديدة</b>\n\nاختر نوع المهمة:", parse_mode=ParseMode.HTML, reply_markup=kb.get_task_types_menu())
+
+async def cmd_grades(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.user_data.get('auth'):
+        return await update.message.reply_text("🔐 يرجى تسجيل الدخول أولاً عبر /start")
+    await update.message.reply_text("📊 <b>إدارة الدرجات</b>\n\nاختر عملية:", parse_mode=ParseMode.HTML, reply_markup=kb.get_grades_menu())
+
+async def cmd_tasks(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.user_data.get('auth'):
+        return await update.message.reply_text("🔐 يرجى تسجيل الدخول أولاً عبر /start")
+    await update.message.reply_text("📋 <b>عرض المهام</b>", parse_mode=ParseMode.HTML, reply_markup=kb.get_main_menu())
