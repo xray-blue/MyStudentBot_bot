@@ -198,3 +198,9 @@ async def get_user_subjects(user_id):
         cursor = await db.execute('SELECT DISTINCT subject FROM grades WHERE user_id = ?', (user_id,))
         rows = await cursor.fetchall()
         return [row[0] for row in rows]
+
+async def get_notes_by_date(user_id, date_str):
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute('SELECT * FROM tasks WHERE user_id = ? AND type = ? AND due_date = ? ORDER BY id DESC', (user_id, 'note', date_str))
+        return await cursor.fetchall()
