@@ -227,6 +227,26 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"✅ تم تعديل الدرجة بنجاح إلى: <code>{score_txt}</code>", parse_mode=ParseMode.HTML, reply_markup=kb.get_main_menu())
         return
 
+        # ===== حفظ الملاحظة مباشرة بدون مواعيد =====
+    if action == 'awaiting_note_text':
+        today = datetime.now().strftime('%Y-%m-%d')
+        target_date = context.user_data.get('note_target_date', today)
+        
+        # حفظ في قاعدة البيانات كـ type='note' بدون تنبيهات
+        await db.add_task_to_db(user.id, 'note', text, target_date, remind_before=0, priority=0)
+        await db.add_xp(user.id, 2)
+        
+        context.user_data.pop('action', None)
+        context.user_data.pop('note_target_date', None)
+        
+        cont_kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("➕ إضافة ملاحظة أخرى", callback_data="note_add_prompt")],
+            [InlineKeyboardButton("◀️ رجوع للقائمة", callback_data="menu_main")]
+        ])
+        await update.message.reply_text("✅ تم حفظ الملاحظة بنجاح!", reply_markup=cont_kb)
+        return
+
+    
     # =====================================================================
     # 🔥 الفلتر الذهبي: أي نص يصل إلى هنا يعني أن المستخدم يتحدث بشكل عادي
     # نقوم بإرساله لك مباشرة كرسالة دعم فني
