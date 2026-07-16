@@ -50,7 +50,6 @@ async def save_task_and_finish_from_message(update, context, user):
     )
 
 def clean_rtl(text):
-    """دالة لإزالة رموز اتجاه الكتابة المخفية من تليجرام"""
     return text.replace('\u200f', '').replace('\u200e', '').replace('\u202a', '').replace('\u202c', '').strip()
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -66,15 +65,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if is_auth: context.user_data['auth'] = True
         return await update.message.reply_text("❌ تم إلغاء العملية.", reply_markup=kb.get_main_menu() if is_auth else None)
 
+    # ===== رد الأدمن =====
     if user.id == ADMIN_ID and action == 'ADMIN_TYPING_REPLY':
         target_id = context.user_data.get('reply_to_id')
         try:
-            # إرسال الرد للمستخدم باسم "المطور" فقط كما طلبت
             await context.bot.send_message(chat_id=target_id, text=f"📬 <b>المطور:</b>\n\n{text}", parse_mode=ParseMode.HTML)
             await update.message.reply_text("✅ تم إرسال الرد للمستخدم بنجاح!")
         except: 
             await update.message.reply_text("❌ فشل الإرسال. تأكد أن المستخدم لم يحظر البوت.")
-        # تنظيف حالة الأدمن
         is_auth = context.user_data.get('auth')
         context.user_data.clear()
         if is_auth: context.user_data['auth'] = True
@@ -118,21 +116,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data.pop('action', None)
             return await update.message.reply_text(f"✅ تم ضبط التنبيه إلى {hours} ساعة.", reply_markup=kb.get_main_menu())
         except: return await update.message.reply_text("❌ أرسل رقماً صحيحاً.", reply_markup=kb.get_back_button())
-
-    if action == 'AWAITING_MSG_ADMIN':
-        context.user_data.pop('action', None)
-        # تصميم رسالة الأدمن مع زر الرد السريع
-        admin_msg = f"✉️ <b>رسالة جديدة من المستخدم:</b>\nالاسم: {user_tag}\nالآيدي: <code>{user.id}</code>\n\nالرسالة:\n{text}"
-        admin_kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("💬 رد على هذه الرسالة", callback_data=f"admin_reply_{user.id}")]
-        ])
-        try:
-            # إرسال الرسالة لك أنت (للأدمن)
-            await context.bot.send_message(chat_id=ADMIN_ID, text=admin_msg, parse_mode=ParseMode.HTML, reply_markup=admin_kb)
-            await update.message.reply_text("✅ تم إرسال رسالتك للمطور بنجاح!", reply_markup=kb.get_main_menu())
-        except Exception as e:
-            await update.message.reply_text("❌ حدث خطأ في إرسال الرسالة.", reply_markup=kb.get_main_menu())
-        return
 
     if action == 'awaiting_task_title':
         context.user_data['task_title'] = text
@@ -183,7 +166,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return await update.message.reply_text(f"✅ تم التأجيل إلى {new_date}.", reply_markup=kb.get_main_menu())
         except: return await update.message.reply_text("❌ أرسل رقماً صحيحاً.", reply_markup=kb.get_back_button())
 
-    # ===== إضافة مادة جديدة =====
     if action == 'waiting_new_subject':
         subject = text.strip()
         context.user_data['current_subject'] = subject
@@ -191,70 +173,57 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"✅ تم إنشاء مادة <b>{subject}</b>.\n\nأرسل أول درجة بهذه الصيغة:\n<code>الشهر الأول 90</code>\nأو: <code>نصفي 15/20</code>", parse_mode=ParseMode.HTML, reply_markup=kb.get_back_button())
         return
 
-    # ===== إضافة درجة (محدث ليعالج الرموز المخفية) =====
     if action == 'waiting_grade_input':
         subject = context.user_data.get('current_subject')
-        # تنظيف النص من الرموز المخفية
         clean_text = clean_rtl(text)
-        
         match = re.match(r"^(.+?)\s+(\d+(?:\.\d+)?)(?:\s*[/من]\s*(\d+(?:\.\d+)?))?", clean_text)
-        
         if not match: 
-            return await update.message.reply_text(
-                "❌ صيغة خاطئة! تأكد من كتابة (العنوان) ثم مسافة ثم (الرقم).\nمثال: <code>الشهر الأول 90</code>", 
-                parse_mode=ParseMode.HTML, 
-                reply_markup=kb.get_back_button()
-            )
-            
+            return await update.message.reply_text("❌ صيغة خاطئة! تأكد من كتابة (العنوان) ثم مسافة ثم (الرقم).\nمثال: <code>الشهر الأول 90</code>", parse_mode=ParseMode.HTML, reply_markup=kb.get_back_button())
         title = match.group(1).strip()
         score = float(match.group(2))
         total = float(match.group(3)) if match.group(3) else score
-        
         await db.add_grade_to_db(user.id, subject, title, score, total)
         await db.add_xp(user.id, 5)
         score_txt = format_num(score) if total == score else f"{format_num(score)}/{format_num(total)}"
-        
         await notify_admin(context.bot, f"📊 أضاف <b>{user_tag}</b> درجة [{subject}]: {title} {score_txt}")
-        
         cont_kb = InlineKeyboardMarkup([
             [InlineKeyboardButton("➕ إضافة درجة أخرى لنفس المادة", callback_data="grade_add_another")],
             [InlineKeyboardButton("◀️ رجوع للقائمة", callback_data="menu_main")]
         ])
-        await update.message.reply_text(
-            f"✅ تم تسجيل <code>{title}: {score_txt}</code> في <b>{subject}</b>", 
-            parse_mode=ParseMode.HTML, 
-            reply_markup=cont_kb
-        )
+        await update.message.reply_text(f"✅ تم تسجيل <code>{title}: {score_txt}</code> في <b>{subject}</b>", parse_mode=ParseMode.HTML, reply_markup=cont_kb)
         return
 
-    # ===== تعديل درجة =====
     if action == 'waiting_edit_grade_score':
         grade_id = context.user_data.get('edit_grade_id')
         clean_text = clean_rtl(text)
-        
         match = re.match(r"^(\d+(?:\.\d+)?)(?:\s*[/من]\s*(\d+(?:\.\d+)?))?", clean_text)
         if not match: 
-            return await update.message.reply_text(
-                "❌ صيغة خاطئة! أرسل الرقم فقط أو (رقم/من رقم)\nمثال: <code>95</code> أو <code>85/100</code>", 
-                parse_mode=ParseMode.HTML, 
-                reply_markup=kb.get_back_button()
-            )
-        
+            return await update.message.reply_text("❌ صيغة خاطئة! أرسل الرقم فقط أو (رقم/من رقم)\nمثال: <code>95</code> أو <code>85/100</code>", parse_mode=ParseMode.HTML, reply_markup=kb.get_back_button())
         score = float(match.group(1))
         total = float(match.group(2)) if match.group(2) else score
-        
         async with aiosqlite.connect("student_dashboard.db") as db_conn:
             await db_conn.execute('UPDATE grades SET score = ?, total = ? WHERE id = ?', (score, total, grade_id))
             await db_conn.commit()
-            
         context.user_data.pop('action', None)
         context.user_data.pop('edit_grade_id', None)
-        
         score_txt = format_num(score) if total == score else f"{format_num(score)}/{format_num(total)}"
         await update.message.reply_text(f"✅ تم تعديل الدرجة بنجاح إلى: <code>{score_txt}</code>", parse_mode=ParseMode.HTML, reply_markup=kb.get_main_menu())
         return
 
-    await update.message.reply_text("📌 استخدم الأزرار للتنقل:", reply_markup=kb.get_main_menu())
+    # =====================================================================
+    # 🔥 الفلتر الذهبي: أي نص يصل إلى هنا يعني أن المستخدم يتحدث بشكل عادي
+    # نقوم بإرساله لك مباشرة كرسالة دعم فني
+    # =====================================================================
+    admin_msg = f"💬 <b>رسالة من المستخدم:</b>\nالاسم: {user_tag}\nالآيدي: <code>{user.id}</code>\n\nالرسالة:\n{text}"
+    admin_kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("💬 رد على الرسالة", callback_data=f"admin_reply_{user.id}")]
+    ])
+    try:
+        await context.bot.send_message(chat_id=ADMIN_ID, text=admin_msg, parse_mode=ParseMode.HTML, reply_markup=admin_kb)
+        # لا نرسل للمستخدم "تم الإرسال" لكي لا يكون البوت مزعجاً له، نرسل له القائمة فقط
+        await update.message.reply_text("📌 استخدم الأزرار للتنقل:", reply_markup=kb.get_main_menu())
+    except Exception:
+        pass
 
 async def media_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -263,7 +232,6 @@ async def media_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if update.message.photo: file_id = update.message.photo[-1].file_id
         elif update.message.video: file_id = update.message.video.file_id
         elif update.message.document: file_id = update.message.document.file_id
-        
         if file_id:
             context.user_data['attachment'] = file_id
             await save_task_and_finish_from_message(update, context, user)
