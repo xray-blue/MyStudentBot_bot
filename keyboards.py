@@ -87,8 +87,10 @@ def get_notes_menu():
         [InlineKeyboardButton("◀️ رجوع", callback_data="menu_main")]
     ])
 
-def generate_calendar(year, month, tasks_by_day):
-    # tasks_by_day الآن بهيكل: { day: {'tasks': int, 'notes': int} }
+def generate_calendar(year, month, tasks_by_day, notes_by_day=None):
+    # إذا لم يتم إرسال قاموس الملاحظات، نجعله فارغاً
+    if notes_by_day is None: notes_by_day = {}
+    
     keyboard = []
     keyboard.append([InlineKeyboardButton(f"{month}/{year}", callback_data="noop")])
     days_of_week = ["سبت", "أحد", "اثنين", "ثلاثاء", "أربعاء", "خميس", "جمعة"]
@@ -106,16 +108,19 @@ def generate_calendar(year, month, tasks_by_day):
         row.append(InlineKeyboardButton(" ", callback_data="noop"))
         
     for day in range(1, days_in_month+1):
-        counts = tasks_by_day.get(day, {'tasks': 0, 'notes': 0})
-        label = f"{day}"
+        # نتحقق إذا كان في مهام أو ملاحظات في هذا اليوم
+        has_tasks = tasks_by_day.get(day, 0) > 0
+        has_notes = notes_by_day.get(day, 0) > 0
         
-        # ترميز الأيقونات حسب المحتوى
-        if counts['tasks'] > 0 and counts['notes'] > 0:
+        # نضع العلامات المناسبة بجانب رقم اليوم
+        if has_tasks and has_notes:
             label = f"{day}🔴📝"
-        elif counts['tasks'] > 0:
+        elif has_tasks:
             label = f"{day}🔴"
-        elif counts['notes'] > 0:
+        elif has_notes:
             label = f"{day}📝"
+        else:
+            label = f"{day}"
             
         row.append(InlineKeyboardButton(label, callback_data=f"cal_day_{year}_{month}_{day}"))
         if len(row) == 7:
