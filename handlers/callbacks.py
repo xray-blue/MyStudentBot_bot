@@ -259,13 +259,35 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer("📌 تم تثبيت المهمة!", show_alert=True)
         await query.edit_message_text("✅ تم التثبيت.", reply_markup=kb.get_main_menu())
 
-    elif data.startswith("del_task_"):
-        task_id = int(data.split("_")[-1])
+    elif data == "set_msg_admin":
+        context.user_data['action'] = 'AWAITING_MSG_ADMIN'
+        await query.edit_message_text("✉️ اكتب رسالتك للمطور الآن:", parse_mode=ParseMode.HTML, reply_markup=kb.get_back_button())
+
+    # ===== حذف جميع البيانات =====
+    elif data == "set_del_all_prompt":
+        await query.edit_message_text(
+            "⚠️ <b>تحذير:</b> سيتم حذف جميع بياناتك (المهام، الدرجات، الإنجازات، والحساب) نهائياً!\n\nهل أنت متأكد؟",
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🗑 نعم، احذف الكل", callback_data="del_all_yes")],
+                [InlineKeyboardButton("❌ لا، ارجع", callback_data="menu_settings")]
+            ])
+        )
+        
+    elif data == "del_all_yes":
+        user_id = user.id
         async with aiosqlite.connect("student_dashboard.db") as db_conn:
-            await db_conn.execute('DELETE FROM tasks WHERE id = ?', (task_id,))
+            await db_conn.execute('DELETE FROM tasks WHERE user_id = ?', (user_id,))
+            await db_conn.execute('DELETE FROM grades WHERE user_id = ?', (user_id,))
+            await db_conn.execute('DELETE FROM badges WHERE user_id = ?', (user_id,))
+            await db_conn.execute('DELETE FROM recurring_tasks WHERE user_id = ?', (user_id,))
+            await db_conn.execute('DELETE FROM user_settings WHERE user_id = ?', (user_id,))
+            await db_conn.execute('DELETE FROM users WHERE user_id = ?', (user_id,))
             await db_conn.commit()
-        await query.answer("🗑 تم حذف المهمة!", show_alert=True)
-        await query.edit_message_text("✅ تم الحذف.", reply_markup=kb.get_main_menu())
+            
+        # تسجيل خروج المستخدم بعد حذف بياناته
+        context.user_data.clear() 
+        await query.edit_message_text("🗑 <b>تم حذف جميع بياناتك بنجاح.</b>\n\nلإعادة التسجيل أرسل /start", parse_mode=ParseMode.HTML)
 
     # =====================================================================
     # ===== نظام الدرجات المتطور (القائمة الفرعية والمواد) =====
