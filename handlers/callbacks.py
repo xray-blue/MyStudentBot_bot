@@ -53,7 +53,16 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['reply_to_id'] = target_id
         await query.message.reply_text(f"✉️ اكتب ردك على المستخدم ({target_id}) الآن:\n(للإلغاء أرسل /cancel)")
         return
-
+    # ===== معالجة زر "ابدأ الآن" من واجهة الستارت =====
+    if data == "auth_start":
+        if not await db.get_user_hash(user.id):
+            context.user_data['state'] = 'AWAITING_SET_PWD'
+            await query.edit_message_text("🔐 يرجى اختيار كلمة مرور للحساب (4 أحرف على الأقل):")
+        else:
+            context.user_data['state'] = 'AWAITING_LOGIN'
+            await query.edit_message_text("🔐 يرجى إرسال كلمة المرور:")
+        return
+        
     if not context.user_data.get('auth'):
         return await query.answer("🔐 قم بتسجيل الدخول أولاً!", show_alert=True)
 
@@ -149,6 +158,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await save_task_and_finish(query, context, user)
 
     # ===== حذف المهمة (تم وضعه هنا ليكون واضحاً ويعمل 100%) =====
+    # ===== حذف المهمة (مع التأكيد) =====
     elif data == "menu_del_task":
         tasks = await db.get_tasks_from_db(user.id, include_completed=False)
         if not tasks:
@@ -160,15 +170,32 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             emoji = {"exam": "📝", "homework": "📚", "prep": "📖", "note": "📄"}.get(t['type'], "📌")
             due = f" <code>{t['due_date']}</code>" if t['due_date'] else ""
             response += f"{emoji} {t['title']}{due}\n"
-            buttons.append([InlineKeyboardButton(f"🗑 حذف: {t['title'][:25]}", callback_data=f"del_task_{t['id']}")])
+            # تغيير اسم الزر إلى del_task_confirm
+            buttons.append([InlineKeyboardButton(f"🗑 حذف: {t['title'][:25]}", callback_data=f"del_task_confirm_{t['id']}")])
         buttons.append([InlineKeyboardButton("◀️ رجوع للقائمة", callback_data="menu_main")])
         await query.edit_message_text(response, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(buttons))
 
-    elif data.startswith("del_task_"):
+    # ===== نافذة التأكيد قبل الحذف =====
+    elif data.startswith("del_task_confirm_"):
         task_id = int(data.split("_")[-1])
-        async with aiosqlite.connect("student_dashboard.db") as db_conn:
-            await db_conn.execute('DELETE FROM tasks WHERE id = ?', (task_id,))
-            await db_conn.commit()
+        context.user_data['del_task_id'] = task_id # حفظ المؤقت
+        await query.edit_message_text(
+            "⚠️ <b>تحذير:</b> هل أنت متأكد من حذف هذه المهمة نهائياً؟", 
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("✅ نعم، احذفها", callback_data="del_task_yes")],
+                [InlineKeyboardButton("❌ لا، ارجع", callback_data="menu_del_task")]
+            ])
+        )
+
+    # ===== تنفيذ الحذف الفعلي =====
+    elif data == "del_task_yes":
+        task_id = context.user_data.get('del_task_id')
+        if task_id:
+            async with aiosqlite.connect("student_dashboard.db") as db_conn:
+                await db_conn.execute('DELETE FROM tasks WHERE id = ?', (task_id,))
+                await db_conn.commit()
+            context.user_data.pop('del_task_id', None)
         await query.answer("🗑 تم حذف المهمة بنجاح!", show_alert=True)
         await query.edit_message_text("✅ تم حذف المهمة.", reply_markup=kb.get_main_menu())
 
