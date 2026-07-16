@@ -18,7 +18,7 @@ def get_main_menu():
 def get_task_types_menu():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📝 امتحان", callback_data="type_exam"), InlineKeyboardButton("📚 واجب", callback_data="type_homework")],
-        [InlineKeyboardButton("📖 تحضير", callback_data="type_prep"), InlineKeyboardButton("📄 ملاحظة", callback_data="type_note")],
+        [InlineKeyboardButton("📖 تحضير", callback_data="type_prep"), InlineKeyboardButton("📄 ملاحظة سريعة", callback_data="type_note")],
         [InlineKeyboardButton("◀️ رجوع", callback_data="menu_main")]
     ])
 
@@ -53,7 +53,6 @@ def get_settings_menu():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🔑 تغيير كلمة السر", callback_data="set_change_pwd")],
         [InlineKeyboardButton("🗑 حذف جميع بياناتي", callback_data="set_del_all_prompt")],
-        [InlineKeyboardButton("✉️ مراسلة المطور", callback_data="set_msg_admin")],
         [InlineKeyboardButton("🌐 تغيير اللغة", callback_data="set_language")],
         [InlineKeyboardButton("⏰ ضبط التنبيه الافتراضي", callback_data="set_default_remind")],
         [InlineKeyboardButton("◀️ رجوع للقائمة", callback_data="menu_main")]
@@ -82,6 +81,7 @@ def get_grades_menu():
     ])
 
 def generate_calendar(year, month, tasks_by_day):
+    # tasks_by_day الآن بهيكل: { day: {'tasks': int, 'notes': int} }
     keyboard = []
     keyboard.append([InlineKeyboardButton(f"{month}/{year}", callback_data="noop")])
     days_of_week = ["سبت", "أحد", "اثنين", "ثلاثاء", "أربعاء", "خميس", "جمعة"]
@@ -99,8 +99,17 @@ def generate_calendar(year, month, tasks_by_day):
         row.append(InlineKeyboardButton(" ", callback_data="noop"))
         
     for day in range(1, days_in_month+1):
-        count = tasks_by_day.get(day, 0)
-        label = f"{day}" if count == 0 else f"{day}🔴"
+        counts = tasks_by_day.get(day, {'tasks': 0, 'notes': 0})
+        label = f"{day}"
+        
+        # ترميز الأيقونات حسب المحتوى
+        if counts['tasks'] > 0 and counts['notes'] > 0:
+            label = f"{day}🔴📝"
+        elif counts['tasks'] > 0:
+            label = f"{day}🔴"
+        elif counts['notes'] > 0:
+            label = f"{day}📝"
+            
         row.append(InlineKeyboardButton(label, callback_data=f"cal_day_{year}_{month}_{day}"))
         if len(row) == 7:
             keyboard.append(row)
