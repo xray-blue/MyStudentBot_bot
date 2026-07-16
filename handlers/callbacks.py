@@ -9,9 +9,6 @@ import database as db
 import keyboards as kb
 from utils import get_user_tag, notify_admin, ADMIN_ID, format_num
 
-# ==========================================
-# دالة مساعدة لحفظ المهمة
-# ==========================================
 async def save_task_and_finish(query, context, user, attachment=None, link=None):
     task_type = context.user_data.get('task_type')
     title = context.user_data.get('task_title')
@@ -41,9 +38,6 @@ async def save_task_and_finish(query, context, user, attachment=None, link=None)
         reply_markup=kb.get_main_menu()
     )
 
-# ==========================================
-# معالج الأزرار الرئيسي
-# ==========================================
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -51,7 +45,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_tag = get_user_tag(user)
     data = query.data
 
-    # ===== رد الأدمن =====
     if data.startswith("admin_reply_"):
         if user.id != ADMIN_ID:
             return await query.answer("❌ هذا الزر للمطور فقط!", show_alert=True)
@@ -67,16 +60,21 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not data.startswith(("tfilter_", "tpage_", "menu_main", "grade_back", "menu_settings", "noop")):
         await notify_admin(context.bot, f"🔘 ضغط <b>{user_tag}</b> على:\n<code>{data}</code>")
 
-    # ===== القائمة الرئيسية =====
     if data == "menu_main":
         is_auth = context.user_data.get('auth')
         context.user_data.clear()
         context.user_data['auth'] = is_auth
         await query.edit_message_text("⚙️ <b>القائمة الرئيسية</b>", parse_mode=ParseMode.HTML, reply_markup=kb.get_main_menu())
 
-    # ===== الإعدادات =====
     elif data == "menu_settings":
-        await query.edit_message_text("⚙️ <b>إعدادات الحساب</b>", parse_mode=ParseMode.HTML, reply_markup=kb.get_settings_menu())
+        # تم إزالة "مراسلة المطور" من هنا لأن المستخدم يقدر يرسل لك في أي وقت الآن
+        await query.edit_message_text("⚙️ <b>إعدادات الحساب</b>", parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔑 تغيير كلمة السر", callback_data="set_change_pwd")],
+            [InlineKeyboardButton("🗑 حذف جميع بياناتي", callback_data="set_del_all_prompt")],
+            [InlineKeyboardButton("🌐 تغيير اللغة", callback_data="set_language")],
+            [InlineKeyboardButton("⏰ ضبط التنبيه الافتراضي", callback_data="set_default_remind")],
+            [InlineKeyboardButton("◀️ رجوع للقائمة", callback_data="menu_main")]
+        ]))
 
     elif data == "set_language":
         await query.edit_message_text("🌐 اختر اللغة:", parse_mode=ParseMode.HTML, reply_markup=kb.get_language_menu())
@@ -95,11 +93,29 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['action'] = 'AWAITING_OLD_PWD'
         await query.edit_message_text("🔑 أرسل كلمة السر الحالية:", parse_mode=ParseMode.HTML, reply_markup=kb.get_back_button())
 
-    elif data == "set_msg_admin":
-        context.user_data['action'] = 'AWAITING_MSG_ADMIN'
-        await query.edit_message_text("✉️ اكتب رسالتك للمطور الآن:", parse_mode=ParseMode.HTML, reply_markup=kb.get_back_button())
+    elif data == "set_del_all_prompt":
+        await query.edit_message_text(
+            "⚠️ <b>تحذير:</b> سيتم حذف جميع بياناتك نهائياً!\n\nهل أنت متأكد؟",
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🗑 نعم، احذف الكل", callback_data="del_all_yes")],
+                [InlineKeyboardButton("❌ لا، ارجع", callback_data="menu_settings")]
+            ])
+        )
+        
+    elif data == "del_all_yes":
+        user_id = user.id
+        async with aiosqlite.connect("student_dashboard.db") as db_conn:
+            await db_conn.execute('DELETE FROM tasks WHERE user_id = ?', (user_id,))
+            await db_conn.execute('DELETE FROM grades WHERE user_id = ?', (user_id,))
+            await db_conn.execute('DELETE FROM badges WHERE user_id = ?', (user_id,))
+            await db_conn.execute('DELETE FROM recurring_tasks WHERE user_id = ?', (user_id,))
+            await db_conn.execute('DELETE FROM user_settings WHERE user_id = ?', (user_id,))
+            await db_conn.execute('DELETE FROM users WHERE user_id = ?', (user_id,))
+            await db_conn.commit()
+        context.user_data.clear() 
+        await query.edit_message_text("🗑 <b>تم حذف جميع بياناتك بنجاح.</b>\n\nلإعادة التسجيل أرسل /start", parse_mode=ParseMode.HTML)
 
-    # ===== إضافة مهمة جديدة =====
     elif data == "menu_add":
         await query.edit_message_text("📝 <b>إضافة مهمة جديدة</b>\n\nاختر نوع المهمة:", parse_mode=ParseMode.HTML, reply_markup=kb.get_task_types_menu())
 
@@ -131,6 +147,30 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     elif data == "attach_no":
         await save_task_and_finish(query, context, user)
+
+    # ===== حذف المهمة (تم وضعه هنا ليكون واضحاً ويعمل 100%) =====
+    elif data == "menu_del_task":
+        tasks = await db.get_tasks_from_db(user.id, include_completed=False)
+        if not tasks:
+            await query.answer("📭 لا توجد مهام لحذفها!", show_alert=True)
+            return
+        buttons = []
+        response = "🗑 <b>اختر المهمة التي تريد حذفها:</b>\n\n"
+        for t in tasks:
+            emoji = {"exam": "📝", "homework": "📚", "prep": "📖", "note": "📄"}.get(t['type'], "📌")
+            due = f" <code>{t['due_date']}</code>" if t['due_date'] else ""
+            response += f"{emoji} {t['title']}{due}\n"
+            buttons.append([InlineKeyboardButton(f"🗑 حذف: {t['title'][:25]}", callback_data=f"del_task_{t['id']}")])
+        buttons.append([InlineKeyboardButton("◀️ رجوع للقائمة", callback_data="menu_main")])
+        await query.edit_message_text(response, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(buttons))
+
+    elif data.startswith("del_task_"):
+        task_id = int(data.split("_")[-1])
+        async with aiosqlite.connect("student_dashboard.db") as db_conn:
+            await db_conn.execute('DELETE FROM tasks WHERE id = ?', (task_id,))
+            await db_conn.commit()
+        await query.answer("🗑 تم حذف المهمة بنجاح!", show_alert=True)
+        await query.edit_message_text("✅ تم حذف المهمة.", reply_markup=kb.get_main_menu())
 
     # ===== التقويم =====
     elif data == "menu_calendar":
@@ -173,7 +213,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else: 
                 month += 1
                 if month == 13: month, year = 1, year + 1
-                
         tasks = await db.get_tasks_from_db(user.id, include_completed=True)
         tasks_by_day = {}
         for t in tasks:
@@ -192,12 +231,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         tasks = await db.get_tasks_from_db(user.id, current_filter, include_completed=False)
         total_pages = max(1, math.ceil(len(tasks) / 5))
         if current_page > total_pages: current_page = total_pages
-
         buttons = [
             [InlineKeyboardButton("📋 الكل", callback_data="tfilter_ALL"), InlineKeyboardButton("📝 امتحانات", callback_data="tfilter_exam"), InlineKeyboardButton("📚 واجبات", callback_data="tfilter_homework")],
             [InlineKeyboardButton("📖 تحضيرات", callback_data="tfilter_prep"), InlineKeyboardButton("📄 الملاحظات", callback_data="tfilter_note")]
         ]
-
         if not tasks:
             buttons.append([InlineKeyboardButton("◀️ رجوع", callback_data="menu_main")])
             await query.edit_message_text("📭 لا توجد مهام.", reply_markup=InlineKeyboardMarkup(buttons))
@@ -211,7 +248,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 prio_emoji = {2: "🔴", 1: "🟡", 0: "🟢"}.get(t['priority'], "⚪")
                 response += f"{prio_emoji} {emoji} {t['title']}{due}\n"
                 buttons.append([InlineKeyboardButton(f"⚙️ {t['title'][:20]}", callback_data=f"action_{t['id']}")])
-
             nav_row = []
             if current_page > 1: nav_row.append(InlineKeyboardButton("◀️ السابق", callback_data=f"tpage_{current_filter}_{current_page-1}"))
             nav_row.append(InlineKeyboardButton(f"{current_page}/{total_pages}", callback_data="noop"))
@@ -220,7 +256,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             buttons.append([InlineKeyboardButton("◀️ رجوع", callback_data="menu_main")])
             await query.edit_message_text(response, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(buttons))
 
-    # ===== إجراءات المهمة =====
     elif data.startswith("action_"):
         task_id = int(data.split("_")[1])
         context.user_data['current_task_id'] = task_id
@@ -259,77 +294,34 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer("📌 تم تثبيت المهمة!", show_alert=True)
         await query.edit_message_text("✅ تم التثبيت.", reply_markup=kb.get_main_menu())
 
-    elif data == "set_msg_admin":
-        context.user_data['action'] = 'AWAITING_MSG_ADMIN'
-        await query.edit_message_text("✉️ اكتب رسالتك للمطور الآن:", parse_mode=ParseMode.HTML, reply_markup=kb.get_back_button())
-
-    # ===== حذف جميع البيانات =====
-    elif data == "set_del_all_prompt":
-        await query.edit_message_text(
-            "⚠️ <b>تحذير:</b> سيتم حذف جميع بياناتك (المهام، الدرجات، الإنجازات، والحساب) نهائياً!\n\nهل أنت متأكد؟",
-            parse_mode=ParseMode.HTML,
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🗑 نعم، احذف الكل", callback_data="del_all_yes")],
-                [InlineKeyboardButton("❌ لا، ارجع", callback_data="menu_settings")]
-            ])
-        )
-        
-    elif data == "del_all_yes":
-        user_id = user.id
-        async with aiosqlite.connect("student_dashboard.db") as db_conn:
-            await db_conn.execute('DELETE FROM tasks WHERE user_id = ?', (user_id,))
-            await db_conn.execute('DELETE FROM grades WHERE user_id = ?', (user_id,))
-            await db_conn.execute('DELETE FROM badges WHERE user_id = ?', (user_id,))
-            await db_conn.execute('DELETE FROM recurring_tasks WHERE user_id = ?', (user_id,))
-            await db_conn.execute('DELETE FROM user_settings WHERE user_id = ?', (user_id,))
-            await db_conn.execute('DELETE FROM users WHERE user_id = ?', (user_id,))
-            await db_conn.commit()
-            
-        # تسجيل خروج المستخدم بعد حذف بياناته
-        context.user_data.clear() 
-        await query.edit_message_text("🗑 <b>تم حذف جميع بياناتك بنجاح.</b>\n\nلإعادة التسجيل أرسل /start", parse_mode=ParseMode.HTML)
-
-    # =====================================================================
-    # ===== نظام الدرجات المتطور (القائمة الفرعية والمواد) =====
-    # =====================================================================
+    # ===== نظام الدرجات =====
     elif data == "menu_grade":
         await query.edit_message_text("📊 <b>إدارة الدرجات</b>\n\nاختر عملية:", parse_mode=ParseMode.HTML, reply_markup=kb.get_grades_menu())
 
     elif data == "grade_add":
         context.user_data['action'] = 'waiting_new_subject'
-        await query.edit_message_text("📝 أرسل <b>اسم المادة</b> الجديدة (مثال: الرياضيات):\n(للإلغاء أرسل /cancel)", parse_mode=ParseMode.HTML, reply_markup=kb.get_back_button())
+        await query.edit_message_text("📝 أرسل <b>اسم المادة</b> الجديدة:\n(للإلغاء أرسل /cancel)", parse_mode=ParseMode.HTML, reply_markup=kb.get_back_button())
 
     elif data == "grade_view_all":
-        # جلب أسماء المواد فقط
         subjects = await db.get_user_subjects(user.id)
         if not subjects:
             await query.answer("📭 لا توجد مواد مسجلة بعد! أضف مادة جديدة.", show_alert=True)
             return
-        
-        # حفظ أسماء المواد مؤقتاً لمعرفة أي مادة تم اختيارها
         context.user_data['subjects_list'] = subjects
-        
         buttons = []
         for idx, subj in enumerate(subjects):
             buttons.append([InlineKeyboardButton(f"📘 {subj}", callback_data=f"subj_view_{idx}")])
-        
         buttons.append([InlineKeyboardButton("◀️ رجوع للقائمة الرئيسية", callback_data="menu_main")])
-        await query.edit_message_text("📚 <b>موادي المسجلة:</b>\n\nاختر مادة لعرض تفاصيلها وإضافة درجات:", parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(buttons))
+        await query.edit_message_text("📚 <b>موادي المسجلة:</b>\n\nاختر مادة لعرض تفاصيلها:", parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(buttons))
 
     elif data.startswith("subj_view_"):
-        # عند الضغط على اسم مادة معينة
         idx = int(data.split("_")[-1])
         subjects = context.user_data.get('subjects_list', [])
-        
-        if idx >= len(subjects):
-            return await query.answer("❌ حدث خطأ في تحميل المادة!", show_alert=True)
-            
+        if idx >= len(subjects): return await query.answer("❌ خطأ!", show_alert=True)
         subject = subjects[idx]
         grades = await db.get_grades_from_db(user.id, subject=subject)
-        
         response = f"📘 <b>مادة: {subject}</b>\n\n"
         buttons = []
-        
         if not grades:
             response += "لا توجد درجات مسجلة في هذه المادة بعد."
         else:
@@ -337,57 +329,36 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 score_txt = format_num(g['score']) if g['score'] == g['total'] else f"{format_num(g['score'])}/{format_num(g['total'])}"
                 title = g['title'] if g['title'] else "بدون عنوان"
                 response += f"• {title}: <code>{score_txt}</code>\n"
-                # زر التعديل بجانب كل درجة
                 buttons.append([InlineKeyboardButton(f"✏️ تعديل: {title[:20]} ({score_txt})", callback_data=f"grade_edit_{g['id']}")])
-        
-        # أزرار إضافة درجة جديدة لهذه المادة أو الرجوع
         buttons.append([InlineKeyboardButton(f"➕ إضافة درجة جديدة لمادة ({subject})", callback_data=f"grade_add_to_subj_{idx}")])
         buttons.append([InlineKeyboardButton("◀️ رجوع لقائمة المواد", callback_data="grade_view_all")])
-        
         await query.edit_message_text(response, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(buttons))
 
     elif data.startswith("grade_add_to_subj_"):
-        # عند اختيار إضافة درجة لمادة موجودة مسبقاً
         idx = int(data.split("_")[-1])
         subjects = context.user_data.get('subjects_list', [])
-        
         if idx < len(subjects):
             subject = subjects[idx]
             context.user_data['current_subject'] = subject
             context.user_data['action'] = 'waiting_grade_input'
-            
-            # نستخدم reply_text بدل edit_message_text لكي يبقى قائمة المادة ظاهرة فوقها
-            await query.message.reply_text(
-                f"📚 مادة: <b>{subject}</b>\n\nأرسل الدرجة الجديدة (مثال: الشهر الثاني 85):\n(للإنهاء أرسل /cancel)", 
-                parse_mode=ParseMode.HTML
-            )
+            await query.message.reply_text(f"📚 مادة: <b>{subject}</b>\n\nأرسل الدرجة الجديدة (مثال: الشهر الثاني 85):", parse_mode=ParseMode.HTML)
             await query.answer("✅ تم تحديد المادة، اكتب الدرجة الآن", show_alert=False)
 
     elif data == "grade_add_another":
-        # إضافة درجة أخرى لنفس المادة (بعد إضافة درجة سابقة)
         subject = context.user_data.get('current_subject')
         if subject:
             context.user_data['action'] = 'waiting_grade_input'
-            await query.message.reply_text(
-                f"📚 مادة: <b>{subject}</b>\n\nأرسل الدرجة التالية:", 
-                parse_mode=ParseMode.HTML
-            )
+            await query.message.reply_text(f"📚 مادة: <b>{subject}</b>\n\nأرسل الدرجة التالية:", parse_mode=ParseMode.HTML)
         else:
             context.user_data['action'] = 'waiting_new_subject'
             await query.edit_message_text("📝 أرسل اسم المادة:", parse_mode=ParseMode.HTML, reply_markup=kb.get_back_button())
 
     elif data.startswith("grade_edit_"):
-        # تعديل درجة
         grade_id = int(data.split("_")[-1])
         context.user_data['action'] = 'waiting_edit_grade_score'
         context.user_data['edit_grade_id'] = grade_id
-        await query.edit_message_text(
-            "✏️ أرسل الدرجة الجديدة (مثال: 95 أو 85/100):\n(للإلغاء أرسل /cancel)", 
-            parse_mode=ParseMode.HTML, 
-            reply_markup=kb.get_back_button()
-        )
+        await query.edit_message_text("✏️ أرسل الدرجة الجديدة (مثال: 95 أو 85/100):\n(للإلغاء أرسل /cancel)", parse_mode=ParseMode.HTML, reply_markup=kb.get_back_button())
 
-    # ===== الإنجازات =====
     elif data == "menu_achievements":
         badges = await db.get_badges(user.id)
         xp, level = await db.get_user_xp(user.id)
