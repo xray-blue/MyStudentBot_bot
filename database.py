@@ -1,6 +1,6 @@
 import aiosqlite
 import hashlib
-
+from datetime import datetime, timedelta
 DB_NAME = "student_dashboard.db"
 
 async def init_db():
@@ -204,3 +204,37 @@ async def get_notes_by_date(user_id, date_str):
         db.row_factory = aiosqlite.Row
         cursor = await db.execute('SELECT * FROM tasks WHERE user_id = ? AND type = ? AND due_date = ? ORDER BY id DESC', (user_id, 'note', date_str))
         return await cursor.fetchall()
+
+async def get_pending_reminders():
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        # جلب كل المهام التي لها موعد، ولها تنبيه، ولم يتم التنبيه عليها بعد
+        cursor = await db.execute('''
+            SELECT * FROM tasks 
+            WHERE due_date IS NOT NULL 
+            AND remind_before > 0 
+            AND is_notified = 0
+        ''')
+        tasks = await cursor.fetchall()
+        
+        pending = []
+        now = datetime.now()
+        for task in tasks:
+            try:
+                # نفترض أن موعد التسليم هو الساعة 7:00 صباحاً من تاريخ الموعد
+                due_dt = datetime.strptime(task['due_date'], '%Y-%m-%d').replace(hour=7, minute=0)
+                # حساب وقت التنبيه (الموعد ناقص ساعات التنبيه المطلوبة)
+                notify_dt = due_dt - timedelta(hours=task['remind_before'])
+                
+                # إذا كان الوقت الحالي قد تجاوز وقت التنبيه
+                if now >= notify_dt:
+                    pending.append(task)
+            except:
+                pass
+        return pending
+
+async def mark_as_notified(task_id):
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute('UPDATE tasks SET is_notified = 1 WHERE id = ?', (task_id,))
+        await db.commit()
+        
