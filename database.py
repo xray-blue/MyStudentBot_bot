@@ -76,6 +76,7 @@ async def init_db():
         try: await db.execute("ALTER TABLE users ADD COLUMN language TEXT DEFAULT 'ar'")
         except: pass
         try: await db.execute("ALTER TABLE users ADD COLUMN default_remind_hours INTEGER DEFAULT 24")
+        except: pass
         try: await db.execute("ALTER TABLE tasks ADD COLUMN due_time TEXT")
         except: pass
 
