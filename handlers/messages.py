@@ -155,6 +155,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # ===== استقبال الوقت الجديد =====
+    # ===== استقبال الوقت الجديد =====
     if action == 'awaiting_task_time':
         if text.strip() in ["بدون", "لا", "0"]:
             context.user_data['task_due_time'] = None
@@ -164,7 +165,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 datetime.strptime(text.strip(), '%H:%M')
                 context.user_data['task_due_time'] = text.strip()
             except ValueError:
-                return await.update.message.reply_text("❌ صيغة الوقت خاطئة! أرسل الوقت بهيئة ساعات:دقائق (مثال: 14:30) أو أرسل 'بدون'.", parse_mode=ParseMode.HTML, reply_markup=kb.get_back_button())
+                return await update.message.reply_text("❌ صيغة الوقت خاطئة! أرسل الوقت بهيئة ساعات:دقائق (مثال: 14:30) أو أرسل 'بدون'.", parse_mode=ParseMode.HTML, reply_markup=kb.get_back_button())
         
         context.user_data['action'] = 'awaiting_remind'
         await update.message.reply_text("⏰ متى تريد التنبيه؟", parse_mode=ParseMode.HTML, reply_markup=kb.get_remind_menu_advanced())
