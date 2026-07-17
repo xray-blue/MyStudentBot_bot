@@ -46,8 +46,9 @@ async def save_task_and_finish_from_message(update, context, user):
     recurring = context.user_data.get('recurring')
     attachment = context.user_data.get('attachment')
     link = context.user_data.get('link')
+    due_time = context.user_data.get('task_due_time')
 
-    task_id = await db.add_task_to_db(user.id, task_type, title, due_date, remind_hours, priority, attachment, link)
+    task_id = await db.add_task_to_db(user.id, task_type, title, due_date, remind_hours, priority, attachment, link, due_time)
 
     if recurring and recurring != 'none':
         await db.add_recurring_task(user.id, task_id, recurring)
@@ -60,8 +61,9 @@ async def save_task_and_finish_from_message(update, context, user):
 
     await notify_admin(context.bot, f"📝 أضاف <b>{get_user_tag(user)}</b> مهمة جديدة:\nالعنوان: {title}\nالتاريخ: {due_date}")
 
+    time_str = f" ⏱ {due_time}" if due_time else ""
     await update.message.reply_text(
-        f"✅ <b>تم حفظ المهمة</b> بنجاح!\n\n📌 {title}\n📅 {due_date}\n🔔 تنبيه قبل {remind_hours} ساعة",
+        f"✅ <b>تم حفظ المهمة</b> بنجاح!\n\n📌 {title}\n📅 {due_date}{time_str}\n🔔 تنبيه قبل {remind_hours} ساعة",
         parse_mode=ParseMode.HTML,
         reply_markup=kb.get_main_menu()
     )
@@ -146,17 +148,26 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             try: datetime.strptime(text, '%Y-%m-%d'); due_date = text
             except: return await update.message.reply_text("❌ صيغة خاطئة. YYYY-MM-DD", reply_markup=kb.get_back_button())
+        
         context.user_data['task_due_date'] = due_date
-        context.user_data['action'] = 'awaiting_remind'
-        await update.message.reply_text("⏰ متى تريد التنبيه؟", reply_markup=kb.get_remind_menu_advanced())
+        context.user_data['action'] = 'awaiting_task_time' # انتقلنا لطلب الوقت
+        await update.message.reply_text("⏱ أرسل <b>وقت المهمة</b> (مثال: 14:30 أو 08:00)\n(إذا أردت بدون وقت محدد أرسل كلمة: بدون)", parse_mode=ParseMode.HTML, reply_markup=kb.get_back_button())
         return
 
-    if action == 'awaiting_attachment':
-        if text.startswith('http://') or text.startswith('https://'):
-            context.user_data['link'] = text; context.user_data['attachment'] = None
-            await save_task_and_finish_from_message(update, context, user)
+    # ===== استقبال الوقت الجديد =====
+    if action == 'awaiting_task_time':
+        if text.strip() in ["بدون", "لا", "0"]:
+            context.user_data['task_due_time'] = None
         else:
-            await update.message.reply_text("📎 أرسل الملف أو رابط يبدأ بـ http://", reply_markup=kb.get_back_button())
+            try:
+                # التأكد من صيغة الساعة:دقيقة
+                datetime.strptime(text.strip(), '%H:%M')
+                context.user_data['task_due_time'] = text.strip()
+            except ValueError:
+                return await.update.message.reply_text("❌ صيغة الوقت خاطئة! أرسل الوقت بهيئة ساعات:دقائق (مثال: 14:30) أو أرسل 'بدون'.", parse_mode=ParseMode.HTML, reply_markup=kb.get_back_button())
+        
+        context.user_data['action'] = 'awaiting_remind'
+        await update.message.reply_text("⏰ متى تريد التنبيه؟", parse_mode=ParseMode.HTML, reply_markup=kb.get_remind_menu_advanced())
         return
 
     if action == 'awaiting_edit_title':
