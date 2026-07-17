@@ -1,16 +1,20 @@
 import aiosqlite
 import hashlib
+import logging
 from datetime import datetime, timedelta
+
 DB_NAME = "student_dashboard.db"
 
 async def init_db():
     async with aiosqlite.connect(DB_NAME) as db:
+        # إنشاء الجداول
         await db.execute('''CREATE TABLE IF NOT EXISTS tasks (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
             type TEXT NOT NULL,
             title TEXT NOT NULL,
             due_date TEXT,
+            due_time TEXT,
             is_notified BOOLEAN DEFAULT 0,
             remind_before INTEGER DEFAULT 0,
             completed BOOLEAN DEFAULT 0,
@@ -60,7 +64,7 @@ async def init_db():
             FOREIGN KEY(user_id) REFERENCES users(user_id) ON DELETE CASCADE
         )''')
 
-        # التوافق مع الإصدار السابق
+        # التوافق مع الإصدارات السابقة (إضافة الأعمدة الجديدة بأمان)
         try: await db.execute("ALTER TABLE tasks ADD COLUMN completed BOOLEAN DEFAULT 0")
         except: pass
         try: await db.execute("ALTER TABLE tasks ADD COLUMN priority INTEGER DEFAULT 0")
@@ -69,6 +73,8 @@ async def init_db():
         except: pass
         try: await db.execute("ALTER TABLE tasks ADD COLUMN link TEXT")
         except: pass
+        try: await db.execute("ALTER TABLE tasks ADD COLUMN due_time TEXT")
+        except: pass
         try: await db.execute("ALTER TABLE users ADD COLUMN xp INTEGER DEFAULT 0")
         except: pass
         try: await db.execute("ALTER TABLE users ADD COLUMN level INTEGER DEFAULT 1")
@@ -76,8 +82,6 @@ async def init_db():
         try: await db.execute("ALTER TABLE users ADD COLUMN language TEXT DEFAULT 'ar'")
         except: pass
         try: await db.execute("ALTER TABLE users ADD COLUMN default_remind_hours INTEGER DEFAULT 24")
-        except: pass
-        try: await db.execute("ALTER TABLE tasks ADD COLUMN due_time TEXT")
         except: pass
 
         await db.commit()
@@ -107,6 +111,12 @@ async def get_tasks_from_db(user_id, task_filter=None, include_completed=False):
         cursor = await db.execute(query, params)
         return await cursor.fetchall()
 
+async def get_notes_by_date(user_id, date_str):
+    async with aiosqlite.connect(DB_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute('SELECT * FROM tasks WHERE user_id = ? AND type = ? AND due_date = ? ORDER BY id DESC', (user_id, 'note', date_str))
+        return await cursor.fetchall()
+
 async def update_task_completion(task_id, completed):
     async with aiosqlite.connect(DB_NAME) as db:
         await db.execute('UPDATE tasks SET completed = ? WHERE id = ?', (completed, task_id))
@@ -129,6 +139,12 @@ async def get_grades_from_db(user_id, subject=None):
         else:
             cursor = await db.execute('SELECT * FROM grades WHERE user_id = ? ORDER BY subject, id DESC', (user_id,))
         return await cursor.fetchall()
+
+async def get_user_subjects(user_id):
+    async with aiosqlite.connect(DB_NAME) as db:
+        cursor = await db.execute('SELECT DISTINCT subject FROM grades WHERE user_id = ?', (user_id,))
+        rows = await cursor.fetchall()
+        return [row[0] for row in rows]
 
 # ===== دوال المستخدمين والإعدادات =====
 async def get_user_hash(user_id):
@@ -195,20 +211,7 @@ async def add_badge(user_id, badge_name):
         await db.execute('INSERT INTO badges (user_id, badge_name) VALUES (?, ?)', (user_id, badge_name))
         await db.commit()
 
-async def get_user_subjects(user_id):
-    async with aiosqlite.connect(DB_NAME) as db:
-        cursor = await db.execute('SELECT DISTINCT subject FROM grades WHERE user_id = ?', (user_id,))
-        rows = await cursor.fetchall()
-        return [row[0] for row in rows]
-
-async def get_notes_by_date(user_id, date_str):
-    async with aiosqlite.connect(DB_NAME) as db:
-        db.row_factory = aiosqlite.Row
-        cursor = await db.execute('SELECT * FROM tasks WHERE user_id = ? AND type = ? AND due_date = ? ORDER BY id DESC', (user_id, 'note', date_str))
-        return await cursor.fetchall()
-
-import logging # تأكد من وجود هذا في أعلى الملف
-
+# ===== دوال التنبيهات الذكية =====
 async def get_pending_reminders():
     async with aiosqlite.connect(DB_NAME) as db:
         db.row_factory = aiosqlite.Row
@@ -225,19 +228,15 @@ async def get_pending_reminders():
         for task in tasks:
             try:
                 due_date_str = task['due_date']
-                due_time_str = task['due_time'] # جلب الوقت الذي حدده المستخدم
+                due_time_str = task['due_time']
                 
                 if due_time_str:
-                    # دمج التاريخ والوقت (مثال: 2023-10-25 14:30)
                     due_dt = datetime.strptime(f"{due_date_str} {due_time_str}", '%Y-%m-%d %H:%M')
                 else:
-                    # إذا لم يحدد وقت، نعتبرها نهاية اليوم الساعة 23:59
                     due_dt = datetime.strptime(due_date_str, '%Y-%m-%d').replace(hour=23, minute=59)
                 
-                # حساب وقت التنبيه الحقيقي (موعد المهمة ناقص ساعات التنبيه)
                 notify_dt = due_dt - timedelta(hours=task['remind_before'])
                 
-                # إذا كان الوقت الحالي قد تجاوز وقت التنبيه
                 if now >= notify_dt:
                     pending.append(task)
             except Exception as e:
@@ -249,4 +248,3 @@ async def mark_as_notified(task_id):
     async with aiosqlite.connect(DB_NAME) as db:
         await db.execute('UPDATE tasks SET is_notified = 1 WHERE id = ?', (task_id,))
         await db.commit()
-        
