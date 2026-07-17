@@ -76,17 +76,18 @@ async def init_db():
         try: await db.execute("ALTER TABLE users ADD COLUMN language TEXT DEFAULT 'ar'")
         except: pass
         try: await db.execute("ALTER TABLE users ADD COLUMN default_remind_hours INTEGER DEFAULT 24")
+        try: await db.execute("ALTER TABLE tasks ADD COLUMN due_time TEXT")
         except: pass
 
         await db.commit()
 
 # ===== دوال المهام =====
-async def add_task_to_db(user_id, task_type, title, due_date, remind_before, priority=0, attachment=None, link=None):
+async def add_task_to_db(user_id, task_type, title, due_date, remind_before, priority=0, attachment=None, link=None, due_time=None):
     async with aiosqlite.connect(DB_NAME) as db:
         cursor = await db.execute(
-            '''INSERT INTO tasks (user_id, type, title, due_date, remind_before, priority, attachment, link)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
-            (user_id, task_type, title, due_date, remind_before, priority, attachment, link)
+            '''INSERT INTO tasks (user_id, type, title, due_date, due_time, remind_before, priority, attachment, link)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+            (user_id, task_type, title, due_date, due_time, remind_before, priority, attachment, link)
         )
         await db.commit()
         return cursor.lastrowid
@@ -205,10 +206,11 @@ async def get_notes_by_date(user_id, date_str):
         cursor = await db.execute('SELECT * FROM tasks WHERE user_id = ? AND type = ? AND due_date = ? ORDER BY id DESC', (user_id, 'note', date_str))
         return await cursor.fetchall()
 
+import logging # تأكد من وجود هذا في أعلى الملف
+
 async def get_pending_reminders():
     async with aiosqlite.connect(DB_NAME) as db:
         db.row_factory = aiosqlite.Row
-        # جلب كل المهام التي لها موعد، ولها تنبيه، ولم يتم التنبيه عليها بعد
         cursor = await db.execute('''
             SELECT * FROM tasks 
             WHERE due_date IS NOT NULL 
@@ -221,15 +223,24 @@ async def get_pending_reminders():
         now = datetime.now()
         for task in tasks:
             try:
-                # نفترض أن موعد التسليم هو الساعة 7:00 صباحاً من تاريخ الموعد
-                due_dt = datetime.strptime(task['due_date'], '%Y-%m-%d').replace(hour=7, minute=0)
-                # حساب وقت التنبيه (الموعد ناقص ساعات التنبيه المطلوبة)
+                due_date_str = task['due_date']
+                due_time_str = task['due_time'] # جلب الوقت الذي حدده المستخدم
+                
+                if due_time_str:
+                    # دمج التاريخ والوقت (مثال: 2023-10-25 14:30)
+                    due_dt = datetime.strptime(f"{due_date_str} {due_time_str}", '%Y-%m-%d %H:%M')
+                else:
+                    # إذا لم يحدد وقت، نعتبرها نهاية اليوم الساعة 23:59
+                    due_dt = datetime.strptime(due_date_str, '%Y-%m-%d').replace(hour=23, minute=59)
+                
+                # حساب وقت التنبيه الحقيقي (موعد المهمة ناقص ساعات التنبيه)
                 notify_dt = due_dt - timedelta(hours=task['remind_before'])
                 
                 # إذا كان الوقت الحالي قد تجاوز وقت التنبيه
                 if now >= notify_dt:
                     pending.append(task)
-            except:
+            except Exception as e:
+                logging.error(f"خطأ في حساب وقت التنبيه: {e}")
                 pass
         return pending
 
