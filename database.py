@@ -237,8 +237,16 @@ async def get_pending_reminders():
                 
                 notify_dt = due_dt - timedelta(hours=task['remind_before'])
                 
-                if now >= notify_dt:
+                # الشرط الذكي الجديد: 
+                # 1. الوقت الحالي يجب أن يكون قد وصل وقت التنبيه (now >= notify_dt)
+                # 2. الوقت الحالي يجب أن يكون قبل موعد المهمة نفسها (now < due_dt)
+                # هذا يمنع إرسال تنبيه فوري إذا كان وقت التنبيه قد فات، ويمنع التنبيه للمواعيد الماضية
+                if notify_dt <= now < due_dt:
                     pending.append(task)
+                elif now >= due_dt:
+                    # إذا كان موعد المهمة نفسه قد مضى، ضع علامة أنه تم التنبيه (أو تجاوزه) لكي لا يفحصه مرة أخرى
+                    await mark_as_notified(task['id'])
+                    
             except Exception as e:
                 logging.error(f"خطأ في حساب وقت التنبيه: {e}")
                 pass
