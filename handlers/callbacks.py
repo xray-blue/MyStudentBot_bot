@@ -13,22 +13,26 @@ async def save_task_and_finish(query, context, user, attachment=None, link=None)
     task_type = context.user_data.get('task_type')
     title = context.user_data.get('task_title')
     due_date = context.user_data.get('task_due_date')
+    due_time = context.user_data.get('task_due_time') # أضف هذا السطر
     priority = context.user_data.get('priority', 0)
     remind_hours = context.user_data.get('remind_hours', 0)
     recurring = context.user_data.get('recurring')
     attachment = context.user_data.get('attachment')
     link = context.user_data.get('link')
 
-    task_id = await db.add_task_to_db(user.id, task_type, title, due_date, remind_hours, priority, attachment, link)
+    # أضف due_time في نهاية هذا السطر
+    task_id = await db.add_task_to_db(user.id, task_type, title, due_date, remind_hours, priority, attachment, link, due_time)
     if recurring and recurring != 'none': await db.add_recurring_task(user.id, task_id, recurring)
     await db.add_xp(user.id, 5)
 
-    for key in ['task_type', 'task_title', 'task_due_date', 'priority', 'remind_hours', 'recurring', 'attachment', 'link']:
+    # أضف 'task_due_time' في هذه القائمة ليتم مسحه بعد الحفظ
+    for key in ['task_type', 'task_title', 'task_due_date', 'task_due_time', 'priority', 'remind_hours', 'recurring', 'attachment', 'link']:
         context.user_data.pop(key, None)
     context.user_data.pop('action', None)
 
-    await notify_admin(context.bot, f"📝 أضاف <b>{get_user_tag(user)}</b> مهمة جديدة:\nالعنوان: {title}\nالتاريخ: {due_date}")
-    await query.edit_message_text(f"✅ <b>تم حفظ المهمة</b>!\n\n📌 {title}\n📅 {due_date}", parse_mode=ParseMode.HTML, reply_markup=kb.get_main_menu())
+    time_str = f" ⏱ {due_time}" if due_time else ""
+    await notify_admin(context.bot, f"📝 أضاف <b>{get_user_tag(user)}</b> مهمة جديدة:\nالعنوان: {title}\nالتاريخ: {due_date} {due_time}")
+    await query.edit_message_text(f"✅ <b>تم حفظ المهمة</b>!\n\n📌 {title}\n📅 {due_date}{time_str}\n🔔 تنبيه قبل {remind_hours} ساعة", parse_mode=ParseMode.HTML, reply_markup=kb.get_main_menu())
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
